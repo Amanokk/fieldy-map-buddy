@@ -443,7 +443,7 @@ export function Dashboard() {
             .then(async (raw) => {
               await importPackageFile(raw);
               await useSurvey.getState().selectProject("planta-retiro-sao-joaquim");
-              useSurvey.getState().setTab("mapa");
+              useSurvey.getState().showOnMap("pl-asfalto-002");
             })
             .catch(() => toast("Não foi possível carregar a planta."));
         }}
