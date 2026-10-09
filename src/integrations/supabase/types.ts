@@ -14,7 +14,128 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      deletions: {
+        Row: {
+          deleted_at: string
+          id: string
+          kind: string
+          team_code: string
+        }
+        Insert: {
+          deleted_at: string
+          id: string
+          kind: string
+          team_code: string
+        }
+        Update: {
+          deleted_at?: string
+          id?: string
+          kind?: string
+          team_code?: string
+        }
+        Relationships: []
+      }
+      features: {
+        Row: {
+          accuracy: number | null
+          geometry: Json
+          heading: number | null
+          id: string
+          kind: string
+          lat: number
+          length_m: number | null
+          lng: number
+          note: string
+          origin: string
+          point_count: number
+          project_id: string
+          recorded_at: string
+          sample_count: number
+          seq: number
+          speed: number | null
+          team_code: string
+          type: string
+          updated_at: string
+        }
+        Insert: {
+          accuracy?: number | null
+          geometry: Json
+          heading?: number | null
+          id: string
+          kind: string
+          lat: number
+          length_m?: number | null
+          lng: number
+          note?: string
+          origin?: string
+          point_count?: number
+          project_id: string
+          recorded_at: string
+          sample_count?: number
+          seq: number
+          speed?: number | null
+          team_code: string
+          type: string
+          updated_at: string
+        }
+        Update: {
+          accuracy?: number | null
+          geometry?: Json
+          heading?: number | null
+          id?: string
+          kind?: string
+          lat?: number
+          length_m?: number | null
+          lng?: number
+          note?: string
+          origin?: string
+          point_count?: number
+          project_id?: string
+          recorded_at?: string
+          sample_count?: number
+          seq?: number
+          speed?: number | null
+          team_code?: string
+          type?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "features_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      projects: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          place: string
+          team_code: string
+          updated_at: string
+        }
+        Insert: {
+          created_at: string
+          id: string
+          name: string
+          place?: string
+          team_code: string
+          updated_at: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          place?: string
+          team_code?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
