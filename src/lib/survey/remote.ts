@@ -160,130 +160,80 @@ function rowFeature(row: Record<string, unknown>): SyncFeature | null {
 }
 
 export const syncBundle = createServerFn({ method: "POST" })
-  .validator((data: unknown) => parsePayload(data))
+  .inputValidator((data: unknown) => parsePayload(data))
   .handler(async ({ data }): Promise<SyncResult> => {
-    const { getSql } = await import("@/lib/db");
-    const sql = await getSql();
-    for (const project of data.projects) {
-      await sql.query(
-        `insert into projects (id, team_code, name, place, created_at, updated_at)
-         select $1, $2, $3, $4, $5, $6
-         where not exists (
-           select 1 from deletions d
-           where d.id = $1 and d.team_code = $2 and d.deleted_at >= $6::timestamptz
-         )
-         on conflict (id) do update set
-           name = excluded.name,
-           place = excluded.place,
-           updated_at = excluded.updated_at
-         where projects.team_code = excluded.team_code`,
-        [project.id, data.teamCode, project.name, project.place, project.createdAt, project.updatedAt],
-      );
+    const { supabaseAdmin: db } = await import("@/integrations/supabase/client.server");
+    const team = data.teamCode;
+    const fail = (e: { message: string } | null) => {
+      if (e) throw new Error(e.message);
+    };
+
+    const { data: delRows, error: dErr } = await db.from("deletions").select("id, kind, deleted_at").eq("team_code", team);
+    fail(dErr);
+    const deletedAt = new Map((delRows ?? []).map((r) => [r.id, new Date(r.deleted_at).getTime()]));
+    const alive = (id: string, updatedAt: string) => {
+      const d = deletedAt.get(id);
+      return d == null || new Date(updatedAt).getTime() > d;
+    };
+
+    // Never touch rows owned by another team.
+    const ids = [...data.projects.map((p) => p.id), ...data.features.map((f) => f.id)];
+    const foreign = new Set<string>();
+    if (ids.length) {
+      const [p, f] = await Promise.all([
+        db.from("projects").select("id, team_code").in("id", data.projects.map((x) => x.id).concat("__")),
+        db.from("features").select("id, team_code").in("id", data.features.map((x) => x.id).concat("__")),
+      ]);
+      fail(p.error);
+      fail(f.error);
+      for (const r of [...(p.data ?? []), ...(f.data ?? [])]) if (r.team_code !== team) foreign.add(r.id);
     }
-    for (const feature of data.features) {
-      await sql.query(
-        `insert into features (
-           id, team_code, project_id, type, kind, seq, lat, lng, geometry,
-           accuracy, heading, speed, note, length_m, point_count, sample_count,
-           origin, recorded_at, updated_at
-         )
-         select $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb,
-           $10, $11, $12, $13, $14, $15, $16,
-           $17, $18, $19
-         where not exists (
-           select 1 from deletions d
-           where d.id = $1 and d.team_code = $2 and d.deleted_at >= $19::timestamptz
-         )
-         on conflict (id) do update set
-           type = excluded.type,
-           kind = excluded.kind,
-           seq = excluded.seq,
-           lat = excluded.lat,
-           lng = excluded.lng,
-           geometry = excluded.geometry,
-           accuracy = excluded.accuracy,
-           heading = excluded.heading,
-           speed = excluded.speed,
-           note = excluded.note,
-           length_m = excluded.length_m,
-           point_count = excluded.point_count,
-           sample_count = excluded.sample_count,
-           origin = excluded.origin,
-           updated_at = excluded.updated_at
-         where features.team_code = excluded.team_code`,
-        [
-          feature.id,
-          data.teamCode,
-          feature.projectId,
-          feature.type,
-          feature.kind,
-          feature.seq,
-          feature.lat,
-          feature.lng,
-          JSON.stringify(feature.coordinates),
-          feature.accuracy,
-          feature.heading,
-          feature.speed,
-          feature.note,
-          feature.lengthM,
-          feature.pointCount,
-          feature.sampleCount,
-          feature.origin,
-          feature.recordedAt,
-          feature.updatedAt,
-        ],
+
+    const projects = data.projects.filter((p) => !foreign.has(p.id) && alive(p.id, p.updatedAt));
+    if (projects.length) {
+      const { error } = await db.from("projects").upsert(
+        projects.map((p) => ({ id: p.id, team_code: team, name: p.name, place: p.place, created_at: p.createdAt, updated_at: p.updatedAt })),
       );
+      fail(error);
     }
-    for (const id of data.deletedFeatureIds) {
-      await sql.query(`delete from features where id = $1 and team_code = $2`, [id, data.teamCode]);
-      await sql.query(
-        `insert into deletions (id, team_code, kind, deleted_at) values ($1, $2, 'feature', now())
-         on conflict (id) do update set deleted_at = now(), team_code = excluded.team_code, kind = 'feature'`,
-        [id, data.teamCode],
+    const features = data.features.filter((f) => !foreign.has(f.id) && alive(f.id, f.updatedAt) && !data.deletedProjectIds.includes(f.projectId));
+    if (features.length) {
+      const { error } = await db.from("features").upsert(
+        features.map((f) => ({
+          id: f.id, team_code: team, project_id: f.projectId, type: f.type, kind: f.kind, seq: f.seq,
+          lat: f.lat, lng: f.lng, geometry: f.coordinates, accuracy: f.accuracy, heading: f.heading, speed: f.speed,
+          note: f.note, length_m: f.lengthM, point_count: f.pointCount, sample_count: f.sampleCount,
+          origin: f.origin, recorded_at: f.recordedAt, updated_at: f.updatedAt,
+        })),
       );
+      fail(error);
     }
-    for (const id of data.deletedProjectIds) {
-      await sql.query(`delete from features where project_id = $1 and team_code = $2`, [id, data.teamCode]);
-      await sql.query(`delete from projects where id = $1 and team_code = $2`, [id, data.teamCode]);
-      await sql.query(
-        `insert into deletions (id, team_code, kind, deleted_at) values ($1, $2, 'project', now())
-         on conflict (id) do update set deleted_at = now(), team_code = excluded.team_code, kind = 'project'`,
-        [id, data.teamCode],
-      );
+    const now = new Date().toISOString();
+    if (data.deletedFeatureIds.length) {
+      fail((await db.from("features").delete().eq("team_code", team).in("id", data.deletedFeatureIds)).error);
+      fail((await db.from("deletions").upsert(data.deletedFeatureIds.map((id) => ({ id, team_code: team, kind: "feature", deleted_at: now })))).error);
     }
-    for (const project of data.projects) {
-      await sql.query(
-        `delete from deletions where id = $1 and team_code = $2 and deleted_at < $3::timestamptz`,
-        [project.id, data.teamCode, project.updatedAt],
-      );
+    if (data.deletedProjectIds.length) {
+      fail((await db.from("features").delete().eq("team_code", team).in("project_id", data.deletedProjectIds)).error);
+      fail((await db.from("projects").delete().eq("team_code", team).in("id", data.deletedProjectIds)).error);
+      fail((await db.from("deletions").upsert(data.deletedProjectIds.map((id) => ({ id, team_code: team, kind: "project", deleted_at: now })))).error);
     }
-    for (const feature of data.features) {
-      await sql.query(
-        `delete from deletions where id = $1 and team_code = $2 and deleted_at < $3::timestamptz`,
-        [feature.id, data.teamCode, feature.updatedAt],
-      );
-    }
-    const projects = await sql.query<Record<string, unknown>>(
-      `select id, name, place, created_at, updated_at from projects where team_code = $1`,
-      [data.teamCode],
-    );
-    const features = await sql.query<Record<string, unknown>>(
-      `select id, project_id, type, kind, seq, lat, lng, geometry, accuracy, heading, speed,
-              note, length_m, point_count, sample_count, origin, recorded_at, updated_at
-       from features where team_code = $1`,
-      [data.teamCode],
-    );
-    const deletions = await sql.query<{ id: string; kind: string }>(
-      `select id, kind from deletions where team_code = $1`,
-      [data.teamCode],
-    );
+
+    const [pr, fr, dr] = await Promise.all([
+      db.from("projects").select("*").eq("team_code", team),
+      db.from("features").select("*").eq("team_code", team),
+      db.from("deletions").select("id, kind").eq("team_code", team),
+    ]);
+    fail(pr.error);
+    fail(fr.error);
+    fail(dr.error);
     return {
-      projects: projects.map(rowProject),
-      features: features.flatMap((row) => {
-        const feature = rowFeature(row);
-        return feature ? [feature] : [];
+      projects: (pr.data ?? []).map((r) => rowProject(r as Record<string, unknown>)),
+      features: (fr.data ?? []).flatMap((r) => {
+        const f = rowFeature(r as Record<string, unknown>);
+        return f ? [f] : [];
       }),
-      deletedProjectIds: deletions.filter((row) => row.kind === "project").map((row) => row.id),
-      deletedFeatureIds: deletions.filter((row) => row.kind === "feature").map((row) => row.id),
+      deletedProjectIds: (dr.data ?? []).filter((r) => r.kind === "project").map((r) => r.id),
+      deletedFeatureIds: (dr.data ?? []).filter((r) => r.kind === "feature").map((r) => r.id),
     };
   });
