@@ -91,7 +91,22 @@ export function FieldApp() {
   const showMap = tab === "campo" || tab === "mapa";
 
   useEffect(() => {
-    void init();
+    void (async () => {
+      await init();
+      // Load the as-built plan automatically the first time on this device.
+      const PLAN_ID = "planta-retiro-sao-joaquim";
+      const state = useSurvey.getState();
+      if (localStorage.getItem("viacampo-planta-v1") || state.projects.some((p) => p.id === PLAN_ID)) return;
+      try {
+        const raw = (await (await fetch("/planta-executado.json")).json()) as unknown;
+        await state.importPackageFile(raw);
+        localStorage.setItem("viacampo-planta-v1", "1");
+        await useSurvey.getState().selectProject(PLAN_ID);
+        useSurvey.getState().showOnMap("pl-asfalto-002");
+      } catch {
+        /* offline on first open: user can load it from Resumo */
+      }
+    })();
   }, [init]);
   useGps();
   useOnlineSync();
