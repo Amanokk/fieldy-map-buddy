@@ -3,7 +3,7 @@ import {
   ChartColumn,
   CloudOff,
   CloudUpload,
-  Crosshair,
+  Crosshair as CrosshairIcon,
   List,
   LocateFixed,
   Map,
@@ -50,7 +50,7 @@ export function TopBar() {
       <div className="mx-auto flex w-full max-w-3xl items-center gap-3 px-3 py-2">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <Crosshair className="size-5 shrink-0 text-accent" aria-hidden="true" />
+            <CrosshairIcon className="size-5 shrink-0 text-accent" aria-hidden="true" />
             <p className="font-display text-2xl leading-none tracking-wide">VIACAMPO</p>
           </div>
           <button
@@ -271,7 +271,7 @@ export function Dock() {
   const openMark = useSurvey((state) => state.openMark);
   const count = useSurvey((state) => state.features.filter((feature) => feature.projectId === state.activeProjectId).length);
   const items = [
-    { id: "campo" as const, label: "Campo", icon: Crosshair },
+    { id: "campo" as const, label: "Campo", icon: CrosshairIcon },
     { id: "mapa" as const, label: "Mapa", icon: Map },
     { id: "lista" as const, label: "Lista", icon: List },
     { id: "resumo" as const, label: "Resumo", icon: ChartColumn },
