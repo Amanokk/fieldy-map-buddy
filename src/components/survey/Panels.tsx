@@ -435,6 +435,22 @@ export function Dashboard() {
       >
         Pacote com fotos (JSON)
       </button>
+      <button
+        type="button"
+        onClick={() => {
+          void fetch("/planta-executado.json")
+            .then((res) => res.json() as Promise<unknown>)
+            .then(async (raw) => {
+              await importPackageFile(raw);
+              await useSurvey.getState().selectProject("planta-retiro-sao-joaquim");
+              useSurvey.getState().setTab("mapa");
+            })
+            .catch(() => toast("Não foi possível carregar a planta."));
+        }}
+        className="min-h-12 rounded-xl bg-accent text-sm font-semibold text-accent-ink"
+      >
+        Carregar executado da planta (Retiro São Joaquim)
+      </button>
       <label className="flex min-h-12 cursor-pointer items-center justify-center rounded-xl border border-line bg-card text-sm font-medium">
         Importar pacote
         <input
