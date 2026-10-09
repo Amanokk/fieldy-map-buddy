@@ -8,3 +8,6 @@
 > Commits you push to the connected branch sync back to Lovable and show up in
 > the editor, so keep the branch in a working state.
 <!-- LOVABLE:END -->
+
+- Survey data is local-first (IndexedDB in src/lib/survey) and syncs via one server function (src/lib/survey/remote.ts) using the admin client scoped by team code — field crews work offline and share data without accounts.
+- Survey tables have RLS on with no public policies; only the server function touches them — keeps team data unreachable from the browser.
