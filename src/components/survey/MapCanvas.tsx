@@ -42,7 +42,7 @@ export function MapCanvas() {
       if (cancelled || !hostRef.current) return;
       const L = resolveLeaflet(mod);
       apiRef.current = L;
-      map = L.map(host, { zoomControl: false, attributionControl: true }).setView([-14.235, -51.9253], 4);
+      map = L.map(host, { zoomControl: false, attributionControl: true, preferCanvas: true, renderer: L.canvas({ padding: 0.5, tolerance: 8 }) }).setView([-14.235, -51.9253], 4);
       L.control.zoom({ position: "topright" }).addTo(map);
       L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 20,
@@ -94,14 +94,24 @@ export function MapCanvas() {
         L.polyline(latlngs, { color: meta.color, weight: selected ? 6 : 4, opacity: 0.95 })
           .on("click", () => useSurvey.getState().openDetail(feature.id))
           .addTo(layer);
-      } else {
+      } else if (selected) {
         const icon = L.divIcon({
           className: "vc-icon",
           html: pointMarkerHtml(feature.type, selected),
           iconSize: [32, 32],
           iconAnchor: [16, 16],
         });
-        L.marker([feature.lat, feature.lng], { icon, keyboard: true })
+        L.marker([feature.lat, feature.lng], { icon, keyboard: true, zIndexOffset: 500 })
+          .on("click", () => useSurvey.getState().openDetail(feature.id))
+          .addTo(layer);
+      } else {
+        L.circleMarker([feature.lat, feature.lng], {
+          radius: 7,
+          color: "#ffffff",
+          weight: 2,
+          fillColor: meta.color,
+          fillOpacity: 1,
+        })
           .on("click", () => useSurvey.getState().openDetail(feature.id))
           .addTo(layer);
       }
@@ -178,7 +188,7 @@ export function MapCanvas() {
     if (!ready || !map || !fixNow) return;
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const zoom = map.getZoom() < 16 ? 18 : map.getZoom();
-    map.flyTo([fixNow.lat, fixNow.lng], zoom, { duration: reduce ? 0 : 0.6 });
+    safeFly(map, fixNow.lat, fixNow.lng, zoom, reduce ? 0 : 0.6);
   }, [locateTick, ready]);
 
   useEffect(() => {
@@ -187,8 +197,19 @@ export function MapCanvas() {
     const feature = useSurvey.getState().features.find((item) => item.id === focusToken.id);
     if (!feature) return;
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    map.flyTo([feature.lat, feature.lng], Math.max(map.getZoom(), 18), { duration: reduce ? 0 : 0.7 });
+    safeFly(map, feature.lat, feature.lng, Math.max(map.getZoom() || 0, 18), reduce ? 0 : 0.7);
   }, [focusToken, ready]);
 
   return <div ref={hostRef} className="absolute inset-0" />;
+}
+
+function safeFly(map: LeafletMap, lat: number, lng: number, zoom: number, duration: number) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !Number.isFinite(zoom)) return;
+  try {
+    const size = map.getSize();
+    if (duration === 0 || size.x === 0 || size.y === 0) map.setView([lat, lng], zoom, { animate: false });
+    else map.flyTo([lat, lng], zoom, { duration });
+  } catch {
+    try { map.setView([lat, lng], zoom, { animate: false }); } catch { /* mapa ainda sem tamanho */ }
+  }
 }
