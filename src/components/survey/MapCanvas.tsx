@@ -42,7 +42,7 @@ export function MapCanvas() {
       if (cancelled || !hostRef.current) return;
       const L = resolveLeaflet(mod);
       apiRef.current = L;
-      map = L.map(host, { zoomControl: false, attributionControl: true }).setView([-14.235, -51.9253], 4);
+      map = L.map(host, { zoomControl: false, attributionControl: true, preferCanvas: true, renderer: L.canvas({ padding: 0.5, tolerance: 8 }) }).setView([-14.235, -51.9253], 4);
       L.control.zoom({ position: "topright" }).addTo(map);
       L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 20,
@@ -94,14 +94,24 @@ export function MapCanvas() {
         L.polyline(latlngs, { color: meta.color, weight: selected ? 6 : 4, opacity: 0.95 })
           .on("click", () => useSurvey.getState().openDetail(feature.id))
           .addTo(layer);
-      } else {
+      } else if (selected) {
         const icon = L.divIcon({
           className: "vc-icon",
           html: pointMarkerHtml(feature.type, selected),
           iconSize: [32, 32],
           iconAnchor: [16, 16],
         });
-        L.marker([feature.lat, feature.lng], { icon, keyboard: true })
+        L.marker([feature.lat, feature.lng], { icon, keyboard: true, zIndexOffset: 500 })
+          .on("click", () => useSurvey.getState().openDetail(feature.id))
+          .addTo(layer);
+      } else {
+        L.circleMarker([feature.lat, feature.lng], {
+          radius: 7,
+          color: "#ffffff",
+          weight: 2,
+          fillColor: meta.color,
+          fillOpacity: 1,
+        })
           .on("click", () => useSurvey.getState().openDetail(feature.id))
           .addTo(layer);
       }
