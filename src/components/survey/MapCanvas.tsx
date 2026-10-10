@@ -188,7 +188,7 @@ export function MapCanvas() {
     if (!ready || !map || !fixNow) return;
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const zoom = map.getZoom() < 16 ? 18 : map.getZoom();
-    map.flyTo([fixNow.lat, fixNow.lng], zoom, { duration: reduce ? 0 : 0.6 });
+    safeFly(map, fixNow.lat, fixNow.lng, zoom, reduce ? 0 : 0.6);
   }, [locateTick, ready]);
 
   useEffect(() => {
@@ -197,8 +197,19 @@ export function MapCanvas() {
     const feature = useSurvey.getState().features.find((item) => item.id === focusToken.id);
     if (!feature) return;
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    map.flyTo([feature.lat, feature.lng], Math.max(map.getZoom(), 18), { duration: reduce ? 0 : 0.7 });
+    safeFly(map, feature.lat, feature.lng, Math.max(map.getZoom() || 0, 18), reduce ? 0 : 0.7);
   }, [focusToken, ready]);
 
   return <div ref={hostRef} className="absolute inset-0" />;
+}
+
+function safeFly(map: LeafletMap, lat: number, lng: number, zoom: number, duration: number) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !Number.isFinite(zoom)) return;
+  try {
+    const size = map.getSize();
+    if (duration === 0 || size.x === 0 || size.y === 0) map.setView([lat, lng], zoom, { animate: false });
+    else map.flyTo([lat, lng], zoom, { duration });
+  } catch {
+    try { map.setView([lat, lng], zoom, { animate: false }); } catch { /* mapa ainda sem tamanho */ }
+  }
 }
