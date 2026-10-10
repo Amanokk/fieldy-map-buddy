@@ -42,7 +42,7 @@ export function MapCanvas() {
       if (cancelled || !hostRef.current) return;
       const L = resolveLeaflet(mod);
       apiRef.current = L;
-      map = L.map(host, { zoomControl: false, attributionControl: true, preferCanvas: true, renderer: L.canvas({ padding: 0.5, tolerance: 8 }) }).setView([-14.235, -51.9253], 4);
+      map = L.map(host, { zoomControl: false, attributionControl: true, preferCanvas: true, zoomSnap: 0.25, zoomDelta: 0.5, wheelPxPerZoomLevel: 100, wheelDebounceTime: 20, inertia: true, bounceAtZoomLimits: false, renderer: L.canvas({ padding: 0.5, tolerance: 8 }) }).setView([-14.235, -51.9253], 4);
       L.control.zoom({ position: "topright" }).addTo(map);
       L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 20,
@@ -52,6 +52,11 @@ export function MapCanvas() {
       liveLayer.current = L.layerGroup().addTo(map);
       userLayer.current = L.layerGroup().addTo(map);
       map.on("dragstart", () => useSurvey.getState().setFollow(false));
+      const stopFollow = (event: Event) => {
+        if (event.type === "wheel" || (event as TouchEvent).touches?.length > 1) useSurvey.getState().setFollow(false);
+      };
+      host.addEventListener("wheel", stopFollow, { passive: true });
+      host.addEventListener("touchstart", stopFollow, { passive: true });
       const publish = () => {
         if (!map) return;
         const center = map.getCenter();
@@ -88,10 +93,10 @@ export function MapCanvas() {
       const selected = feature.id === highlightId;
       if (feature.kind === "line" && feature.coordinates.length >= 2) {
         const latlngs = feature.coordinates.map(([lng, lat]) => [lat, lng] as [number, number]);
-        L.polyline(latlngs, { color: meta.casing, weight: selected ? 12 : 9, opacity: 0.95 })
+        L.polyline(latlngs, { color: meta.casing, weight: selected ? 12 : 9, opacity: 0.95, smoothFactor: 1.5 })
           .on("click", () => useSurvey.getState().openDetail(feature.id))
           .addTo(layer);
-        L.polyline(latlngs, { color: meta.color, weight: selected ? 6 : 4, opacity: 0.95 })
+        L.polyline(latlngs, { color: meta.color, weight: selected ? 6 : 4, opacity: 0.95, smoothFactor: 1.5 })
           .on("click", () => useSurvey.getState().openDetail(feature.id))
           .addTo(layer);
       } else if (selected) {
@@ -177,7 +182,7 @@ export function MapCanvas() {
         sawFix.current = true;
         map.setView([fix.lat, fix.lng], 18);
       } else {
-        map.panTo([fix.lat, fix.lng], { animate: !reduce, duration: 0.45 });
+        if (!map.getBounds().pad(-0.25).contains([fix.lat, fix.lng])) map.panTo([fix.lat, fix.lng], { animate: !reduce, duration: 0.45 });
       }
     }
   }, [fix, follow, ready]);

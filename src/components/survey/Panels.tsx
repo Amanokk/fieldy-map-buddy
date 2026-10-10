@@ -430,6 +430,17 @@ export function Dashboard() {
       </div>
       <button
         type="button"
+        onClick={() => {
+          void import("@/lib/survey/planImage")
+            .then((m) => m.downloadPlanImage(project, mine as never))
+            .catch(() => toast("Sem registros para gerar a imagem."));
+        }}
+        className="min-h-12 rounded-xl bg-accent text-sm font-semibold text-accent-ink"
+      >
+        Gerar imagem da planta (PNG)
+      </button>
+      <button
+        type="button"
         onClick={() => void exportActive("package")}
         className="min-h-12 rounded-xl border border-line bg-card text-sm font-medium"
       >
