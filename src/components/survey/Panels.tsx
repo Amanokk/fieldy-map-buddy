@@ -388,6 +388,7 @@ export function Dashboard() {
   const setTeamCode = useSurvey((state) => state.setTeamCode);
   const importPackageFile = useSurvey((state) => state.importPackageFile);
   const [codeDraft, setCodeDraft] = useState("");
+  const [generatingImage, setGeneratingImage] = useState(false);
 
   const mine = features.filter((feature) => feature.projectId === project?.id);
   const count = (type: (typeof FEATURE_TYPES)[number]) => mine.filter((feature) => feature.type === type).length;
@@ -430,14 +431,21 @@ export function Dashboard() {
       </div>
       <button
         type="button"
-        onClick={() => {
-          void import("@/lib/survey/planImage")
-            .then((m) => m.downloadPlanImage(project, mine as never))
-            .catch(() => toast("Sem registros para gerar a imagem."));
+        disabled={generatingImage || !mine.length}
+        onClick={async () => {
+          setGeneratingImage(true);
+          try {
+            const { downloadPlanImage } = await import("@/lib/survey/planImage");
+            await downloadPlanImage(project, mine);
+          } catch (error) {
+            toast(error instanceof Error ? error.message : "Não foi possível gerar a imagem.");
+          } finally {
+            setGeneratingImage(false);
+          }
         }}
-        className="min-h-12 rounded-xl bg-accent text-sm font-semibold text-accent-ink"
+        className="min-h-12 rounded-xl bg-accent text-sm font-semibold text-accent-ink disabled:opacity-50"
       >
-        Gerar imagem da planta (PNG)
+        {generatingImage ? "Gerando imagem…" : "Gerar planta detalhada deitada (PNG)"}
       </button>
       <button
         type="button"
