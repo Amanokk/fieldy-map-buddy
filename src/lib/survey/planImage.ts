@@ -1,203 +1,173 @@
+import proj4 from "proj4";
+import baseAsset from "@/assets/retiro-base.jpg.asset.json";
 import { CATALOG, type FeatureType, type Project } from "./types";
 
 type AnyFeature = {
   type: FeatureType;
-  kind?: string;
   lat: number;
   lng: number;
   coordinates?: [number, number][];
   lengthM?: number | null;
 };
 
-const LINE_ORDER: { type: FeatureType; width: number; alpha: number }[] = [
-  { type: "calcada", width: 14, alpha: 0.75 },
-  { type: "meiofio", width: 7, alpha: 0.9 },
-  { type: "asfalto", width: 7, alpha: 1 },
-  { type: "tatil", width: 5, alpha: 1 },
+const INK = "#222222", PAPER = "#ffffff", MUTED = "#666666", GRID = "#e5e5e5";
+const UTM = "+proj=utm +zone=23 +south +ellps=GRS80 +units=m +no_defs";
+const ANGLE = -52 * Math.PI / 180;
+const ITEMS: { type: FeatureType; label: string }[] = [
+  { type: "ralo", label: "CAIXA-RALO COM GRELHA" },
+  { type: "meiofio", label: "MEIO-FIO" },
+  { type: "calcada", label: "CALÇADA" },
+  { type: "asfalto", label: "ASFALTO" },
+  { type: "tatil", label: "PISO TÁTIL" },
+  { type: "deficiente", label: "ACESSIBILIDADE" },
 ];
 
-/** Desenha uma planta do executado (estilo prancha) e baixa como PNG. */
+async function loadBase(): Promise<HTMLImageElement> {
+  const image = new Image();
+  image.crossOrigin = "anonymous";
+  image.src = baseAsset.url;
+  await image.decode();
+  return image;
+}
+
+/** Exportação local: base real georreferenciada, sem consultar serviços de mapas. */
 export async function downloadPlanImage(project: Project | null, features: AnyFeature[]) {
-  const W = 2400;
-  const H = 1700;
-  const canvas = document.createElement("canvas");
-  canvas.width = W;
-  canvas.height = H;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("canvas");
-
+  const W = 3600, H = 2400;
   const valid = features.filter((f) => Number.isFinite(f.lat) && Number.isFinite(f.lng));
-  const pts: [number, number][] = [];
-  for (const f of valid) {
-    if (f.coordinates && f.coordinates.length >= 2) pts.push(...f.coordinates.map(([lng, lat]) => [lng, lat] as [number, number]));
-    else pts.push([f.lng, f.lat]);
+  const points = valid.flatMap((f): [number, number][] => f.coordinates?.length ? f.coordinates : [[f.lng, f.lat]]);
+  if (!points.length) throw new Error("Sem registros para gerar a imagem.");
+  const isRetiro = project?.id === "planta-retiro-sao-joaquim" && points.every(([lng, lat]) => lng > -42.92 && lng < -42.87 && lat > -22.78 && lat < -22.72);
+  // O fundo da obra não é reutilizado em projetos ou locais diferentes.
+  const base = isRetiro ? await loadBase().catch(() => null) : null;
+  const angle = isRetiro ? ANGLE : 0;
+  const cos = Math.cos(angle), sin = Math.sin(angle);
+  const toLocal = (lng: number, lat: number): [number, number] => {
+    const [e, n] = proj4("EPSG:4326", UTM, [lng, lat]);
+    const x = e - 715200, y = 7483600 - n;
+    return [x * cos - y * sin, x * sin + y * cos];
+  };
+  const projected = points.map(([lng, lat]) => toLocal(lng, lat));
+  const xs = projected.map((p) => p[0]), ys = projected.map((p) => p[1]);
+  const minX = Math.min(...xs) - 100, maxX = Math.max(...xs) + 100;
+  const minY = Math.min(...ys) - 100, maxY = Math.max(...ys) + 100;
+  const area = { x: 70, y: 140, w: 2690, h: 2120 };
+  const scale = Math.min(area.w / (maxX - minX), area.h / (maxY - minY));
+  const ox = area.x + (area.w - (maxX - minX) * scale) / 2 - minX * scale;
+  const oy = area.y + (area.h - (maxY - minY) * scale) / 2 - minY * scale;
+  const P = (lng: number, lat: number): [number, number] => {
+    const [x, y] = toLocal(lng, lat);
+    return [ox + x * scale, oy + y * scale];
+  };
+  const canvas = document.createElement("canvas");
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Não foi possível preparar a imagem.");
+  ctx.fillStyle = PAPER; ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = INK; ctx.lineWidth = 2; ctx.strokeRect(40, 40, W - 80, H - 80);
+  ctx.fillStyle = INK; ctx.font = "bold 42px sans-serif";
+  ctx.fillText("LEVANTAMENTO DE PAVIMENTAÇÃO E ACESSIBILIDADE", 70, 105);
+  ctx.save(); ctx.beginPath(); ctx.rect(area.x, area.y, area.w, area.h); ctx.clip();
+  if (base) {
+    // Grade da prancha: E=715200 em x=394; N=7483600 em y=275.
+    // 400 m = 567 px. Recorte original: x=140, y=60 (render 2×).
+    const pixelsPerMeter = 567 / 400;
+    ctx.save(); ctx.translate(ox, oy); ctx.rotate(angle);
+    ctx.drawImage(base, (140 - 394) / pixelsPerMeter * scale, (60 - 275) / pixelsPerMeter * scale,
+      base.naturalWidth / pixelsPerMeter * scale, base.naturalHeight / pixelsPerMeter * scale);
+    ctx.restore();
+  } else {
+    ctx.strokeStyle = GRID; ctx.lineWidth = 1;
+    const step = Math.max(50 * scale, 20);
+    for (let x = area.x; x < area.x + area.w; x += step) { ctx.beginPath(); ctx.moveTo(x, area.y); ctx.lineTo(x, area.y + area.h); ctx.stroke(); }
+    for (let y = area.y; y < area.y + area.h; y += step) { ctx.beginPath(); ctx.moveTo(area.x, y); ctx.lineTo(area.x + area.w, y); ctx.stroke(); }
   }
-  if (pts.length === 0) throw new Error("vazio");
-
-  // Papel
-  ctx.fillStyle = "#f7f6f1";
-  ctx.fillRect(0, 0, W, H);
-  ctx.strokeStyle = "#333";
-  ctx.lineWidth = 3;
-  ctx.strokeRect(40, 40, W - 80, H - 80);
-
-  // Área do desenho
-  const area = { x: 80, y: 80, w: W - 640, h: H - 160 };
-  ctx.lineWidth = 1.5;
-  ctx.strokeRect(area.x, area.y, area.w, area.h);
-
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  const lat0 = pts.reduce((s, p) => s + p[1], 0) / pts.length;
-  const kx = 111320 * Math.cos((lat0 * Math.PI) / 180);
-  const ky = 110540;
-  for (const [lng, lat] of pts) {
-    const x = lng * kx, y = lat * ky;
-    minX = Math.min(minX, x); maxX = Math.max(maxX, x);
-    minY = Math.min(minY, y); maxY = Math.max(maxY, y);
-  }
-  const pad = 60;
-  const scale = Math.min((area.w - pad * 2) / Math.max(maxX - minX, 1), (area.h - pad * 2) / Math.max(maxY - minY, 1));
-  const ox = area.x + (area.w - (maxX - minX) * scale) / 2;
-  const oy = area.y + (area.h - (maxY - minY) * scale) / 2;
-  const P = (lng: number, lat: number): [number, number] => [ox + (lng * kx - minX) * scale, oy + (maxY - lat * ky) * scale];
-
-  // Grade de fundo (a cada 50 m)
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(area.x, area.y, area.w, area.h);
-  ctx.clip();
-  ctx.strokeStyle = "#dedbd0";
-  ctx.lineWidth = 1;
-  const step = 50 * scale;
-  if (step > 8) {
-    for (let x = ox % step; x < area.x + area.w; x += step) { ctx.beginPath(); ctx.moveTo(x, area.y); ctx.lineTo(x, area.y + area.h); ctx.stroke(); }
-    for (let y = oy % step; y < area.y + area.h; y += step) { ctx.beginPath(); ctx.moveTo(area.x, y); ctx.lineTo(area.x + area.w, y); ctx.stroke(); }
-  }
-
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  for (const layer of LINE_ORDER) {
-    ctx.strokeStyle = CATALOG[layer.type].color;
-    ctx.globalAlpha = layer.alpha;
-    ctx.lineWidth = layer.width;
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  for (const layer of [
+    { type: "calcada", width: 13, alpha: 0.65 },
+    { type: "meiofio", width: 5, alpha: 0.9 },
+    { type: "asfalto", width: 5, alpha: 0.9 },
+    { type: "tatil", width: 4, alpha: 1 },
+  ] as const) {
+    ctx.strokeStyle = CATALOG[layer.type].color; ctx.lineWidth = layer.width; ctx.globalAlpha = layer.alpha;
     for (const f of valid) {
       if (f.type !== layer.type || !f.coordinates || f.coordinates.length < 2) continue;
-      ctx.beginPath();
-      f.coordinates.forEach(([lng, lat], i) => {
-        const [x, y] = P(lng, lat);
-        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-      });
-      ctx.stroke();
+      ctx.beginPath(); f.coordinates.forEach(([lng, lat], i) => { const [x, y] = P(lng, lat); if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); }); ctx.stroke();
     }
   }
   ctx.globalAlpha = 1;
-  for (const type of ["ralo", "deficiente"] as FeatureType[]) {
-    ctx.fillStyle = CATALOG[type].color;
-    for (const f of valid) {
-      if (f.type !== type || (f.coordinates && f.coordinates.length >= 2)) continue;
-      const [x, y] = P(f.lng, f.lat);
-      if (type === "ralo") ctx.fillRect(x - 5, y - 5, 10, 10);
-      else { ctx.beginPath(); ctx.arc(x, y, 8, 0, Math.PI * 2); ctx.fill(); }
-    }
+  for (const f of valid) {
+    if (f.type !== "ralo" && f.type !== "deficiente") continue;
+    const [x, y] = P(f.lng, f.lat);
+    ctx.fillStyle = CATALOG[f.type].color;
+    if (f.type === "ralo") { ctx.fillRect(x - 4, y - 4, 8, 8); }
+    else { ctx.beginPath(); ctx.arc(x, y, 7, 0, Math.PI * 2); ctx.fill(); }
   }
   ctx.restore();
+  ctx.strokeStyle = INK; ctx.lineWidth = 2; ctx.strokeRect(area.x, area.y, area.w, area.h);
 
-  // Barra de escala
-  const scaleM = [10, 20, 50, 100, 200, 500, 1000].find((m) => m * scale > 160) ?? 1000;
-  const sx = area.x + 30, sy = area.y + area.h - 40;
-  ctx.fillStyle = "#222";
-  ctx.fillRect(sx, sy, scaleM * scale, 8);
-  ctx.font = "22px sans-serif";
-  ctx.fillText(`${scaleM} m`, sx, sy - 10);
+  // Seta acompanha a rotação: o norte não fica falsamente apontando para cima.
+  const nx = area.x + area.w - 90, ny = area.y + 100;
+  ctx.fillStyle = PAPER; ctx.fillRect(nx - 70, ny - 70, 140, 140);
+  ctx.save(); ctx.translate(nx, ny); ctx.rotate(angle);
+  ctx.fillStyle = INK; ctx.beginPath(); ctx.moveTo(0, -45); ctx.lineTo(-15, 25); ctx.lineTo(0, 12); ctx.lineTo(15, 25); ctx.closePath(); ctx.fill();
+  ctx.restore(); ctx.fillStyle = INK; ctx.font = "bold 27px sans-serif"; ctx.textAlign = "center";
+  ctx.fillText("N", nx + Math.sin(angle) * 58, ny - Math.cos(angle) * 58); ctx.textAlign = "left";
+  const scaleM = [10, 20, 50, 100, 200, 500, 1000].find((m) => m * scale >= 180) ?? 1000;
+  ctx.fillStyle = PAPER; ctx.fillRect(area.x + 20, area.y + area.h - 100, scaleM * scale + 60, 80);
+  ctx.fillStyle = INK; ctx.fillRect(area.x + 40, area.y + area.h - 40, scaleM * scale, 8);
+  ctx.font = "25px sans-serif"; ctx.fillText(`${scaleM} m`, area.x + 40, area.y + area.h - 58);
 
-  // Norte
-  const nx = area.x + area.w - 70, ny = area.y + 90;
-  ctx.beginPath(); ctx.arc(nx, ny, 40, 0, Math.PI * 2); ctx.lineWidth = 2; ctx.strokeStyle = "#222"; ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(nx, ny - 34); ctx.lineTo(nx - 12, ny + 10); ctx.lineTo(nx + 12, ny + 10); ctx.closePath(); ctx.fill();
-  ctx.font = "bold 24px sans-serif"; ctx.textAlign = "center"; ctx.fillText("N", nx, ny + 34); ctx.textAlign = "left";
-
-  // Legenda
-  const lx = W - 520, ly = 80, lw = 440;
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(lx, ly, lw, 520);
-  ctx.strokeRect(lx, ly, lw, 520);
-  ctx.fillStyle = "#111";
-  ctx.font = "bold 40px sans-serif";
-  ctx.textAlign = "center";
-  ctx.fillText("LEGENDA", lx + lw / 2, ly + 60);
-  ctx.textAlign = "left";
-  const items: { type: FeatureType; label: string }[] = [
-    { type: "ralo", label: "CAIXA RALO" },
-    { type: "meiofio", label: "MEIO FIO" },
-    { type: "calcada", label: "CALÇADA" },
-    { type: "asfalto", label: "ASFALTO" },
-    { type: "tatil", label: "PISO TÁTIL" },
-    { type: "deficiente", label: "ACESSIBILIDADE" },
-  ];
-  items.forEach((item, i) => {
-    const y = ly + 100 + i * 66;
+  const lx = 2820, lw = 700;
+  const box = (y: number, h: number, title: string) => {
+    ctx.strokeStyle = INK; ctx.lineWidth = 2; ctx.strokeRect(lx, y, lw, h);
+    ctx.fillStyle = INK; ctx.font = "bold 33px sans-serif"; ctx.fillText(title, lx + 30, y + 55);
+  };
+  box(140, 660, "LEGENDA DO EXECUTADO");
+  ITEMS.forEach((item, i) => {
+    const y = 260 + i * 82;
     ctx.fillStyle = CATALOG[item.type].color;
-    ctx.fillRect(lx + 30, y, 170, 40);
-    ctx.fillStyle = "#111";
-    ctx.font = "bold 26px sans-serif";
-    ctx.fillText(item.label, lx + 220, y + 30);
+    if (item.type === "ralo" || item.type === "deficiente") ctx.fillRect(lx + 35, y - 20, 28, 28);
+    else ctx.fillRect(lx + 35, y - 12, 95, 12);
+    ctx.fillStyle = INK; ctx.font = "bold 26px sans-serif"; ctx.fillText(item.label, lx + 155, y);
   });
-
-  // Resumo
-  const count = (t: FeatureType) => valid.filter((f) => f.type === t).length;
-  const len = (t: FeatureType) => valid.filter((f) => f.type === t).reduce((s, f) => s + (f.lengthM ?? 0), 0);
-  const fm = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(2).replace(".", ",")} km` : `${Math.round(m)} m`);
-  const ry = ly + 560;
-  ctx.fillStyle = "#fff"; ctx.fillRect(lx, ry, lw, 420); ctx.strokeRect(lx, ry, lw, 420);
-  ctx.fillStyle = "#111"; ctx.font = "bold 30px sans-serif"; ctx.fillText("QUANTITATIVO EXECUTADO", lx + 24, ry + 50);
-  ctx.font = "26px sans-serif";
-  [
-    ["Caixas-ralo", String(count("ralo"))],
-    ["Acessibilidade", String(count("deficiente"))],
-    ["Calçada", fm(len("calcada"))],
-    ["Meio-fio", fm(len("meiofio"))],
-    ["Asfalto", fm(len("asfalto"))],
-    ["Piso tátil", fm(len("tatil"))],
-  ].forEach(([k, v], i) => {
-    const y = ry + 105 + i * 50;
-    ctx.textAlign = "left"; ctx.fillText(k, lx + 24, y);
-    ctx.textAlign = "right"; ctx.fillText(v, lx + lw - 24, y);
+  box(840, 570, "QUANTITATIVO EXECUTADO");
+  ITEMS.forEach((item, i) => {
+    const records = valid.filter((f) => f.type === item.type);
+    const line = item.type !== "ralo" && item.type !== "deficiente";
+    const value = line ? `${records.reduce((s, f) => s + (f.lengthM ?? 0), 0).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} m` : `${records.length} un.`;
+    const y = 960 + i * 66;
+    ctx.fillStyle = INK; ctx.font = "25px sans-serif"; ctx.fillText(CATALOG[item.type].label, lx + 30, y);
+    ctx.textAlign = "right"; ctx.font = "bold 28px sans-serif"; ctx.fillText(value, lx + lw - 30, y); ctx.textAlign = "left";
   });
-  ctx.textAlign = "left";
+  box(1450, 810, "IDENTIFICAÇÃO DA OBRA");
+  ctx.font = "bold 32px sans-serif";
+  wrap(ctx, (project?.name ?? "Projeto").toUpperCase(), lx + 30, 1570, lw - 60, 42, 4);
+  ctx.font = "27px sans-serif"; wrap(ctx, project?.place ?? "", lx + 30, 1760, lw - 60, 36, 2);
+  ctx.font = "24px sans-serif"; ctx.fillText(`Gerado em ${new Date().toLocaleString("pt-BR")}`, lx + 30, 1880);
+  ctx.fillText(`${valid.length} registros · SIRGAS 2000 / UTM 23S`, lx + 30, 1930);
+  ctx.fillStyle = MUTED; ctx.font = "24px sans-serif";
+  wrap(ctx, base ? "Base: planta geométrica original, revisão 01. Ruas, lotes e relevo preservados do PDF enviado." : "Base da planta indisponível neste local. Sem nomes de ruas adicionados por aproximação.", lx + 30, 2010, lw - 60, 34, 3);
+  wrap(ctx, "Marcações da planta: posições aproximadas. Conferir em campo antes de usar para medição ou execução.", lx + 30, 2140, lw - 60, 34, 3);
+  ctx.fillStyle = MUTED; ctx.font = "22px sans-serif";
+  ctx.fillText("VIACAMPO · REGISTROS DO LEVANTAMENTO", 70, 2320);
 
-  // Selo
-  const tyy = H - 80 - 260;
-  ctx.fillStyle = "#fff"; ctx.fillRect(lx, tyy, lw, 260); ctx.strokeRect(lx, tyy, lw, 260);
-  ctx.fillStyle = "#111";
-  ctx.font = "bold 28px sans-serif";
-  wrap(ctx, (project?.name ?? "Projeto").toUpperCase(), lx + 24, tyy + 50, lw - 48, 34);
-  ctx.font = "24px sans-serif";
-  ctx.fillText(project?.place || "", lx + 24, tyy + 150, lw - 48);
-  ctx.fillText(`Gerado em ${new Date().toLocaleString("pt-BR")}`, lx + 24, tyy + 190, lw - 48);
-  ctx.font = "18px sans-serif";
-  ctx.fillStyle = "#555";
-  ctx.fillText("Posições dos registros do levantamento — conferir em campo.", lx + 24, tyy + 230, lw - 48);
-
-  const blob: Blob | null = await new Promise((r) => canvas.toBlob(r, "image/png"));
-  if (!blob) throw new Error("png");
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `planta-${(project?.name ?? "projeto").toLowerCase().replace(/[^a-z0-9]+/gi, "-")}.png`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+  const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+  if (!blob) throw new Error("Não foi possível gerar o PNG.");
+  const url = URL.createObjectURL(blob), a = document.createElement("a");
+  a.href = url; a.download = `planta-${(project?.name ?? "projeto").toLowerCase().replace(/[^a-z0-9]+/gi, "-")}.png`;
+  document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
-function wrap(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, max: number, lh: number) {
-  const words = text.split(" ");
-  let line = "";
-  let yy = y;
-  for (const w of words) {
-    const test = line ? `${line} ${w}` : w;
-    if (ctx.measureText(test).width > max && line) { ctx.fillText(line, x, yy); line = w; yy += lh; if (yy > y + lh * 2) break; }
-    else line = test;
+function wrap(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, max: number, lineHeight: number, maxLines: number) {
+  const words = text.split(/\s+/); let line = "", row = 0;
+  for (const word of words) {
+    const next = line ? `${line} ${word}` : word;
+    if (ctx.measureText(next).width > max && line) {
+      ctx.fillText(line, x, y + row * lineHeight); row += 1;
+      if (row >= maxLines) return;
+      line = word;
+    } else line = next;
   }
-  ctx.fillText(line, x, yy);
+  if (line) ctx.fillText(line, x, y + row * lineHeight);
 }
